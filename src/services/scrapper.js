@@ -42,12 +42,12 @@ export const scrapeData = async () => {
     try {
         // Scraping logic
         const data = await page?.evaluate(() => {
-            const element25 = document.querySelector('#pid25');
-            const element26 = document.querySelector('#pid26');
+            const goldPriceElement = document.querySelector('#pid32');
+            const silverPriceElement = document.querySelector('#pid20');
 
             return {
-                gold_price: element25 ? element25.innerText.trim() : null,
-                silver_price: element26 ? element26.innerText.trim() : null,
+                gold_price: goldPriceElement ? goldPriceElement.innerText.trim() : null,
+                silver_price: silverPriceElement ? silverPriceElement.innerText.trim() : null,
             };
         });
 

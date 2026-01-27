@@ -42,7 +42,7 @@ export const scrapeData = async () => {
     try {
         // Scraping logic
         const data = await page?.evaluate(() => {
-            const goldPriceElement = document.querySelector('#pid33');
+            const goldPriceElement = document.querySelector('#pid34');
             const silverPriceElement = document.querySelector('#pid20');
 
             return {

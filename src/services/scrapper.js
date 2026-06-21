@@ -18,6 +18,15 @@ const SELECTORS = {
 };
 
 /**
+ * Default response shape.
+ * Ensures consumers always receive the same payload structure.
+ */
+const DEFAULT_RESPONSE = {
+    gold_price: null,
+    silver_price: null,
+};
+
+/**
  * Weight conversion constants used by international bullion markets.
  *
  * Gold/Silver spot prices are quoted in USD per Troy Ounce.
@@ -40,7 +49,6 @@ const convertSpotToINR = (spotPriceUSD, usdInr, metal) => {
         return null;
     }
 
-    // Convert USD/Troy Ounce -> INR/Troy Ounce
     const spotPriceInINRPerTroyOunce = spotPrice * exchangeRate;
 
     switch (metal) {
@@ -64,23 +72,18 @@ const convertSpotToINR = (spotPriceUSD, usdInr, metal) => {
 export const scrapeData = async () => {
     try {
         const scrapedData = await page?.evaluate((selectors) => {
-            /**
-             * Safely reads text content from an element.
-             */
             const getValue = (selector) =>
                 document.querySelector(selector)?.innerText?.trim() ?? null;
 
             return {
                 /**
                  * Primary values displayed on the website.
-                 * These are preferred whenever available.
                  */
                 goldPrice: getValue(selectors.GOLD_PRICE),
                 silverPrice: getValue(selectors.SILVER_PRICE),
 
                 /**
-                 * Fallback values used when primary values
-                 * are unavailable.
+                 * Fallback values.
                  */
                 spotGold: getValue(selectors.SPOT_GOLD),
                 spotSilver: getValue(selectors.SPOT_SILVER),
@@ -88,8 +91,12 @@ export const scrapeData = async () => {
             };
         }, SELECTORS);
 
+        /**
+         * If evaluate() failed or page is unavailable,
+         * return the default response instead of null.
+         */
         if (!scrapedData) {
-            return null;
+            return DEFAULT_RESPONSE;
         }
 
         let {
@@ -101,7 +108,7 @@ export const scrapeData = async () => {
         } = scrapedData;
 
         /**
-         * Converts values like:
+         * Converts strings like:
          * "4,320.79" -> 4320.79
          */
         const cleanNumber = (value) =>
@@ -119,9 +126,6 @@ export const scrapeData = async () => {
 
         /**
          * Fallback Gold Calculation
-         *
-         * If the website gold price is unavailable,
-         * calculate it from Spot Gold + USD/INR.
          */
         if (
             isMissingValue(goldPrice) &&
@@ -137,9 +141,6 @@ export const scrapeData = async () => {
 
         /**
          * Fallback Silver Calculation
-         *
-         * If the website silver price is unavailable,
-         * calculate it from Spot Silver + USD/INR.
          */
         if (
             isMissingValue(silverPrice) &&
@@ -154,14 +155,17 @@ export const scrapeData = async () => {
         }
 
         /**
-         * Return final prices.
+         * Always return the same response shape.
          *
-         * Values may come directly from the website
-         * or from fallback calculations.
+         * Cases handled:
+         * - Both values available
+         * - Only gold available
+         * - Only silver available
+         * - Neither available
          */
         return {
-            gold_price: goldPrice,
-            silver_price: silverPrice,
+            gold_price: goldPrice ?? null,
+            silver_price: silverPrice ?? null,
         };
     } catch (error) {
         if (error.message.includes("Connection closed")) {
@@ -173,6 +177,6 @@ export const scrapeData = async () => {
             console.error(error.stack);
         }
 
-        return null;
+        return DEFAULT_RESPONSE;
     }
 };

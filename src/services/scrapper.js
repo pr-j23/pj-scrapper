@@ -40,19 +40,20 @@ const convertSpotToINR = (spotPriceUSD, usdInr, metal) => {
         return null;
     }
 
+    // Convert USD/Troy Ounce -> INR/Troy Ounce
     const spotPriceInINRPerTroyOunce = spotPrice * exchangeRate;
 
     switch (metal) {
         case METALS.GOLD:
-            // INR per gram
+            // Gold is quoted per gram in India
             return (
                 spotPriceInINRPerTroyOunce / GRAMS_PER_TROY_OUNCE
             ).toFixed(2);
 
         case METALS.SILVER:
-            // INR per kilogram
+            // Silver is quoted per kilogram in India
             return (
-                spotPriceInINRPerTroyOUNCE * TROY_OUNCES_PER_KILOGRAM
+                spotPriceInINRPerTroyOunce * TROY_OUNCES_PER_KILOGRAM
             ).toFixed(2);
 
         default:
@@ -63,15 +64,24 @@ const convertSpotToINR = (spotPriceUSD, usdInr, metal) => {
 export const scrapeData = async () => {
     try {
         const scrapedData = await page?.evaluate((selectors) => {
+            /**
+             * Safely reads text content from an element.
+             */
             const getValue = (selector) =>
                 document.querySelector(selector)?.innerText?.trim() ?? null;
 
             return {
-                // Primary prices shown on the website
+                /**
+                 * Primary values displayed on the website.
+                 * These are preferred whenever available.
+                 */
                 goldPrice: getValue(selectors.GOLD_PRICE),
                 silverPrice: getValue(selectors.SILVER_PRICE),
 
-                // Fallback values
+                /**
+                 * Fallback values used when primary values
+                 * are unavailable.
+                 */
                 spotGold: getValue(selectors.SPOT_GOLD),
                 spotSilver: getValue(selectors.SPOT_SILVER),
                 usdInr: getValue(selectors.USD_INR),
@@ -90,9 +100,17 @@ export const scrapeData = async () => {
             usdInr,
         } = scrapedData;
 
+        /**
+         * Converts values like:
+         * "4,320.79" -> 4320.79
+         */
         const cleanNumber = (value) =>
             Number(String(value).replace(/,/g, "").trim());
 
+        /**
+         * Determines whether a scraped value
+         * should be considered missing.
+         */
         const isMissingValue = (value) =>
             value === null ||
             value === undefined ||
@@ -101,6 +119,9 @@ export const scrapeData = async () => {
 
         /**
          * Fallback Gold Calculation
+         *
+         * If the website gold price is unavailable,
+         * calculate it from Spot Gold + USD/INR.
          */
         if (
             isMissingValue(goldPrice) &&
@@ -116,6 +137,9 @@ export const scrapeData = async () => {
 
         /**
          * Fallback Silver Calculation
+         *
+         * If the website silver price is unavailable,
+         * calculate it from Spot Silver + USD/INR.
          */
         if (
             isMissingValue(silverPrice) &&
@@ -129,6 +153,12 @@ export const scrapeData = async () => {
             );
         }
 
+        /**
+         * Return final prices.
+         *
+         * Values may come directly from the website
+         * or from fallback calculations.
+         */
         return {
             gold_price: goldPrice,
             silver_price: silverPrice,
@@ -140,6 +170,7 @@ export const scrapeData = async () => {
             await startBrowser();
         } else {
             console.error("Scraping error:", error);
+            console.error(error.stack);
         }
 
         return null;

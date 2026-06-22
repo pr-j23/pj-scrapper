@@ -1,7 +1,13 @@
+let browser = null;
+let isScraping = false;
+let browserOpen = false;
+let scrapeInterval = null;
+let page = null;
+
 /**
  * Supported metals.
  */
- const METALS = {
+const METALS = {
     GOLD: "gold",
     SILVER: "silver",
 };
@@ -18,15 +24,6 @@ const SELECTORS = {
 };
 
 /**
- * Default response shape.
- * Ensures consumers always receive the same payload structure.
- */
-const DEFAULT_RESPONSE = {
-    gold_price: null,
-    silver_price: null,
-};
-
-/**
  * Weight conversion constants used by international bullion markets.
  *
  * Gold/Silver spot prices are quoted in USD per Troy Ounce.
@@ -38,8 +35,15 @@ const GRAMS_PER_TROY_OUNCE = 31.1034768;
 const TROY_OUNCES_PER_KILOGRAM = 32.1507466;
 
 /**
- * Converts international spot prices (USD/Troy Ounce)
- * into Indian market prices (INR).
+ * Default response shape.
+ */
+const DEFAULT_RESPONSE = {
+    gold_price: null,
+    silver_price: null,
+};
+
+/**
+ * Converts international spot prices into Indian market prices.
  */
 const convertSpotToINR = (spotPriceUSD, usdInr, metal) => {
     const spotPrice = Number(spotPriceUSD);
@@ -53,13 +57,11 @@ const convertSpotToINR = (spotPriceUSD, usdInr, metal) => {
 
     switch (metal) {
         case METALS.GOLD:
-            // Gold is quoted per gram in India
             return (
                 spotPriceInINRPerTroyOunce / GRAMS_PER_TROY_OUNCE
             ).toFixed(2);
 
         case METALS.SILVER:
-            // Silver is quoted per kilogram in India
             return (
                 spotPriceInINRPerTroyOunce * TROY_OUNCES_PER_KILOGRAM
             ).toFixed(2);
@@ -69,6 +71,51 @@ const convertSpotToINR = (spotPriceUSD, usdInr, metal) => {
     }
 };
 
+function isBrowserOpen() {
+    return browser && browser.process() && !browser.process().killed;
+}
+
+// Create page
+export const createPage = async () => {
+    if (isScraping) {
+        console.error("Cannot scrape: Already scraping Running!");
+        return null;
+    }
+
+    if (!isBrowserOpen()) {
+        console.error("Cannot scrape: Browser not ready!");
+        return null;
+    }
+
+    isScraping = true;
+
+    try {
+        page = await browser.newPage();
+
+        await page.goto(
+            process.env.Scrapper_URL ||
+                "https://www.manokamanagold.com/default.aspx",
+            {
+                timeout: 60000,
+                waitUntil: "domcontentloaded",
+            }
+        );
+
+        console.log("Page Created & Running...");
+    } catch (error) {
+        if (error.message.includes("Connection closed")) {
+            console.error("Browser connection closed. Restarting browser...");
+            await closeBrowser();
+            await startBrowser();
+        } else {
+            console.error("Scraping error:", error);
+        }
+
+        return null;
+    }
+};
+
+// Scrape Data
 export const scrapeData = async () => {
     try {
         const scrapedData = await page?.evaluate((selectors) => {
@@ -76,25 +123,17 @@ export const scrapeData = async () => {
                 document.querySelector(selector)?.innerText?.trim() ?? null;
 
             return {
-                /**
-                 * Primary values displayed on the website.
-                 */
+                // Direct values from website
                 goldPrice: getValue(selectors.GOLD_PRICE),
                 silverPrice: getValue(selectors.SILVER_PRICE),
 
-                /**
-                 * Fallback values.
-                 */
+                // Fallback values
                 spotGold: getValue(selectors.SPOT_GOLD),
                 spotSilver: getValue(selectors.SPOT_SILVER),
                 usdInr: getValue(selectors.USD_INR),
             };
         }, SELECTORS);
 
-        /**
-         * If evaluate() failed or page is unavailable,
-         * return the default response instead of null.
-         */
         if (!scrapedData) {
             return DEFAULT_RESPONSE;
         }
@@ -107,17 +146,9 @@ export const scrapeData = async () => {
             usdInr,
         } = scrapedData;
 
-        /**
-         * Converts strings like:
-         * "4,320.79" -> 4320.79
-         */
         const cleanNumber = (value) =>
             Number(String(value).replace(/,/g, "").trim());
 
-        /**
-         * Determines whether a scraped value
-         * should be considered missing.
-         */
         const isMissingValue = (value) =>
             value === null ||
             value === undefined ||
@@ -125,7 +156,8 @@ export const scrapeData = async () => {
             value === "--";
 
         /**
-         * Fallback Gold Calculation
+         * Gold fallback:
+         * If pid34 is empty, calculate using Spot Gold + USDINR.
          */
         if (
             isMissingValue(goldPrice) &&
@@ -140,7 +172,8 @@ export const scrapeData = async () => {
         }
 
         /**
-         * Fallback Silver Calculation
+         * Silver fallback:
+         * If pid20 is empty, calculate using Spot Silver + USDINR.
          */
         if (
             isMissingValue(silverPrice) &&
@@ -154,15 +187,6 @@ export const scrapeData = async () => {
             );
         }
 
-        /**
-         * Always return the same response shape.
-         *
-         * Cases handled:
-         * - Both values available
-         * - Only gold available
-         * - Only silver available
-         * - Neither available
-         */
         return {
             gold_price: goldPrice ?? null,
             silver_price: silverPrice ?? null,
@@ -171,12 +195,80 @@ export const scrapeData = async () => {
         if (error.message.includes("Connection closed")) {
             console.error("Browser connection closed. Restarting browser...");
             await closeBrowser();
-            await startBrowser();
         } else {
             console.error("Scraping error:", error);
             console.error(error.stack);
         }
 
         return DEFAULT_RESPONSE;
+    }
+};
+
+// Start Browser
+export const startBrowser = async (puppeteer) => {
+    if (!browserOpen) {
+        console.log("Starting browser...");
+
+        browser = await puppeteer.launch({
+            headless: true,
+            args: [
+                "--no-sandbox",
+                "--disable-setuid-sandbox",
+                "--disable-dev-shm-usage",
+                "--single-process",
+                "--no-zygote",
+            ],
+        });
+
+        browserOpen = true;
+    }
+};
+
+// Close Browser
+export const closeBrowser = async () => {
+    if (browserOpen && browser) {
+        console.log("Closing browser...");
+
+        await browser.close();
+
+        browser = null;
+        browserOpen = false;
+    }
+};
+
+// Start Scraping
+export const startScraping = async (wss) => {
+    if (scrapeInterval || isScraping) {
+        return;
+    }
+
+    console.log("Start Scrapping....");
+
+    await createPage();
+
+    scrapeInterval = setInterval(async () => {
+        const data = await scrapeData();
+
+        if (data) {
+            wss.clients.forEach((client) => {
+                client.send(JSON.stringify(data));
+            });
+        }
+    }, process.env.Scrapping_Interval || 60000);
+};
+
+// Stop Scraping
+export const stopScraping = async () => {
+    if (scrapeInterval) {
+        clearInterval(scrapeInterval);
+
+        scrapeInterval = null;
+
+        if (page) {
+            await page.close();
+        }
+
+        page = null;
+        isScraping = false;
     }
 };
